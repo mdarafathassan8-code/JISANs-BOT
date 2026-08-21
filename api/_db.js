@@ -1,0 +1,1 @@
+const {createClient}=require('@libsql/client');const db=createClient({url:process.env.TURSO_DATABASE_URL,authToken:process.env.TURSO_AUTH_TOKEN});async function init(){await db.execute(`CREATE TABLE IF NOT EXISTS requests(id TEXT PRIMARY KEY,status TEXT NOT NULL,reason TEXT,expires_at INTEGER,created_at INTEGER NOT NULL)`)}module.exports={db,init};
