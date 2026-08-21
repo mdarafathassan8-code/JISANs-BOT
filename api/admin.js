@@ -1,1 +1,35 @@
-const {db,init}=require('./_db');const auth=(req,res)=>{if(req.headers.authorization!==`Bearer ${process.env.ADMIN_KEY}`){res.status(401).json({error:'unauthorized'});return false}return true};module.exports=async(req,res)=>{await init();if(!auth(req,res))return;if(req.method==='GET'){const q=await db.execute('SELECT * FROM requests ORDER BY created_at DESC');return res.json({requests:q.rows})}if(req.method!=='POST')return res.status(405).json({error:'method'});const {id,action}=req.body||{};if(!/^\d{8}$/.test(String(id||'')))return res.status(400).json({error:'invalid Trader ID'});if(!['accept','reject_link','reject_deposit'].includes(action))return res.status(400).json({error:'invalid action'});if(action==='accept'){const exp=Date.now()+72*60*60*1000;await db.execute({sql:`UPDATE requests SET status='approved',reason=NULL,expires_at=? WHERE id=?`,args:[exp,String(id)]});return res.json({ok:true,action:'accepted',expiresAt:new Date(exp).toISOString()})}const reason=action==='reject_link'?'এই Trader ID-টি JISANs Trader-এর লিংকে নয়।':'আপনার একাউন্টে ডিপোজিট করা হয়নি';await db.execute({sql:`UPDATE requests SET status='rejected',reason=?,expires_at=NULL WHERE id=?`,args:[reason,String(id)]});return res.json({ok:true,action:'rejected',reason})};
+const {db,init}=require('./_db');
+
+const auth=(req,res)=>{
+  if(req.headers.authorization!==`Bearer ${process.env.ADMIN_KEY}`){
+    res.status(401).json({error:'Admin Key ভুল হয়েছে'});
+    return false;
+  }
+  return true;
+};
+
+module.exports=async(req,res)=>{
+  if(!auth(req,res)) return;
+  try{
+    await init();
+    if(req.method==='GET'){
+      const q=await db.execute('SELECT * FROM requests ORDER BY created_at DESC');
+      return res.status(200).json({ok:true,requests:q.rows});
+    }
+    if(req.method!=='POST') return res.status(405).json({error:'method not allowed'});
+    const {id,action}=req.body||{};
+    if(!/^\d{8}$/.test(String(id||''))) return res.status(400).json({error:'invalid Trader ID'});
+    if(!['accept','reject_link','reject_deposit'].includes(action)) return res.status(400).json({error:'invalid action'});
+    if(action==='accept'){
+      const exp=Date.now()+72*60*60*1000;
+      await db.execute({sql:`UPDATE requests SET status='approved',reason=NULL,expires_at=? WHERE id=?`,args:[exp,String(id)]});
+      return res.json({ok:true,action:'accepted',expiresAt:new Date(exp).toISOString()});
+    }
+    const reason=action==='reject_link'?'এই Trader ID-টি JISANs Trader-এর লিংকে নয়।':'আপনার একাউন্টে ডিপোজিট করা হয়নি';
+    await db.execute({sql:`UPDATE requests SET status='rejected',reason=?,expires_at=NULL WHERE id=?`,args:[reason,String(id)]});
+    return res.json({ok:true,action:'rejected',reason});
+  }catch(e){
+    console.error('ADMIN_API_ERROR',e);
+    return res.status(500).json({error:`Database error: ${e.message||'unknown error'}`});
+  }
+};
