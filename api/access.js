@@ -24,7 +24,11 @@ module.exports = async (req, res) => {
       if (!p || p.status !== 'approved' || Number(p.expires_at) <= Date.now()) return res.status(403).json({ error: 'এই purchase-এর access active নেই।' });
       const hash = passwordHash(password);
       if (p.password_hash && p.password_hash !== hash) return res.status(409).json({ error: 'Password already created. নিচের Password Login ব্যবহার করুন।' });
-      await db.execute({ sql: 'UPDATE payments SET password_hash=? WHERE id=?', args: [hash, id] });
+      if (!p.password_hash) {
+        const duplicate = await db.execute({ sql: `SELECT id FROM payments WHERE password_hash=? AND id<>? LIMIT 1`, args: [hash, id] });
+        if (duplicate.rows[0]) return res.status(409).json({ error: 'এই password আগে ব্যবহার করা হয়েছে। অন্য ৮ সংখ্যার password দিন।' });
+        await db.execute({ sql: 'UPDATE payments SET password_hash=? WHERE id=?', args: [hash, id] });
+      }
       return res.json({ ok: true, expiresAt: new Date(Number(p.expires_at)).toISOString() });
     }
 
