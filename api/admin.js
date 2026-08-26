@@ -14,7 +14,7 @@ module.exports=async(req,res)=>{
     if(req.method==='GET'){
       const [rq,pq]=await Promise.all([
         db.execute('SELECT * FROM requests ORDER BY created_at DESC'),
-        db.execute('SELECT id,amount,status,reason,screenshot,created_at,expires_at FROM payments ORDER BY created_at DESC')
+        db.execute('SELECT id,amount,status,reason,screenshot,payment_reference,created_at,expires_at FROM payments ORDER BY created_at DESC')
       ]);
       return res.status(200).json({ok:true,requests:rq.rows,payments:pq.rows});
     }
