@@ -17,21 +17,47 @@
 <div class="section"><h3>🔐 Password Login</h3><p class="muted">আগে purchase confirm করে ৮ সংখ্যার password তৈরি করে থাকলে এখানে password দিয়ে সরাসরি access করুন।</p><input id="loginPass" inputmode="numeric" maxlength="8" placeholder="৮ সংখ্যার Password"><button class="btn" id="loginBtn">PASSWORD LOGIN</button><div id="loginMsg" class="msg hide"></div></div>
 </section></main>
 <script>
-const $=x=>document.getElementById(x);const params=new URLSearchParams(location.search);let pid=params.get('id')||localStorage.getItem('jisans_payment_id')||'',timer=null,pollTimer=null;
+const $=x=>document.getElementById(x);
+const params=new URLSearchParams(location.search);
+let pid=params.get('id')||localStorage.getItem('jisans_payment_id')||'',timer=null,pollTimer=null;
 function setMsg(text,error=false){$('msg').textContent=text;$('msg').classList.toggle('error',error)}
 function loginMsg(text,error=false){$('loginMsg').textContent=text;$('loginMsg').classList.remove('hide');$('loginMsg').classList.toggle('error',error)}
 function startCountdown(exp,id=pid){$('active').classList.remove('hide');if(timer)clearInterval(timer);function tick(){let ms=Math.max(0,new Date(exp).getTime()-Date.now()),t=Math.floor(ms/1000),d=Math.floor(t/86400);t%=86400;let h=Math.floor(t/3600);t%=3600;let m=Math.floor(t/60),s=t%60;$('count').textContent=`${String(d).padStart(2,'0')}:${String(h).padStart(2,'0')}:${String(m).padStart(2,'0')}:${String(s).padStart(2,'0')}`;if(ms<=0){clearInterval(timer);$('download').href='/api/download?payment='+encodeURIComponent(id);$('download').classList.remove('hide')}}tick();timer=setInterval(tick,1000)}
-async function create(){if(pid){history.replaceState(null,'','/payment.html?id='+encodeURIComponent(pid));return}const r=await fetch('/api/payment',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({action:'create'})});const x=await r.json();if(!r.ok)throw new Error(x.error||'Payment session failed');pid=x.id;localStorage.setItem('jisans_payment_id',pid);history.replaceState(null,'','/payment.html?id='+encodeURIComponent(pid));setMsg('Payment ID ready. Payment করার পর screenshot এবং reference submit করুন।')}
+function resetForNewPurchase(message='NEW PURCHASE READY. PAYMENT SCREENSHOT AND REFERENCE SUBMIT করুন।'){$('rejectedBox').classList.add('hide');$('active').classList.add('hide');$('uploadBox').classList.remove('hide');$('submit').disabled=false;$('shot').value='';$('paymentReference').value='';$('preview').removeAttribute('src');$('preview').style.display='none';setMsg(message)}
+async function create(){const r=await fetch('/api/payment',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({action:'create'})});const x=await r.json();if(!r.ok)throw new Error(x.error||'Payment session failed');pid=x.id;localStorage.setItem('jisans_payment_id',pid);history.replaceState(null,'','/payment.html?id='+encodeURIComponent(pid));resetForNewPurchase();return x}
+async function loadExistingOrCreate(){
+  // Explicit URL id always wins. Otherwise validate the saved session before reusing it.
+  if(params.get('id')){pid=params.get('id');localStorage.setItem('jisans_payment_id',pid);return true}
+  if(!pid)return !!(await create());
+  try{
+    const r=await fetch('/api/payment?id='+encodeURIComponent(pid),{cache:'no-store'});
+    if(!r.ok)throw new Error('old session unavailable');
+    const x=await r.json(),p=x.payment;
+    if(!p)throw new Error('old session unavailable');
+    if(p.status==='approved'){location.href='/create-password.html?id='+encodeURIComponent(pid);return false}
+    if(p.status==='rejected'){localStorage.removeItem('jisans_payment_id');pid='';return !!(await create())}
+    if(p.screenshot){$('uploadBox').classList.add('hide');setMsg('Screenshot এবং payment reference submit হয়েছে। Admin review-এর অপেক্ষায় আছেন।');return true}
+    resetForNewPurchase();
+    return true;
+  }catch(e){localStorage.removeItem('jisans_payment_id');pid='';return !!(await create())}
+}
 async function compress(file){return new Promise((resolve,reject)=>{const img=new Image(),reader=new FileReader();reader.onload=()=>{img.onload=()=>{const max=1400,scale=Math.min(1,max/img.width),c=document.createElement('canvas');c.width=Math.round(img.width*scale);c.height=Math.round(img.height*scale);c.getContext('2d').drawImage(img,0,0,c.width,c.height);resolve(c.toDataURL('image/jpeg',.72))};img.src=reader.result};reader.onerror=reject;reader.readAsDataURL(file)})}
 function showRejected(reason){$('uploadBox').classList.add('hide');$('active').classList.add('hide');$('rejectedBox').classList.remove('hide');$('preview').style.display='none';$('shot').value='';$('paymentReference').value='';setMsg('PAYMENT REJECTED. '+(reason||'আপনি চাইলে নতুন করে purchase করতে পারেন।'),true)}
-function resetForNewPurchase(){if(pollTimer){clearTimeout(pollTimer);pollTimer=null}if(timer){clearInterval(timer);timer=null}$('rejectedBox').classList.add('hide');$('active').classList.add('hide');$('uploadBox').classList.remove('hide');$('submit').disabled=false;$('shot').value='';$('paymentReference').value='';$('preview').removeAttribute('src');$('preview').style.display='none';setMsg('NEW PURCHASE READY. PAYMENT SCREENSHOT AND REFERENCE SUBMIT করুন।')}
-async function purchaseAgain(){if(pollTimer)clearTimeout(pollTimer);if(timer)clearInterval(timer);localStorage.removeItem('jisans_payment_id');pid='';history.replaceState(null,'','/payment.html');resetForNewPurchase();try{await create();resetForNewPurchase();await poll()}catch(e){setMsg(e.message,true)}}
+async function purchaseAgain(){
+  if(pollTimer)clearTimeout(pollTimer);if(timer)clearInterval(timer);
+  localStorage.removeItem('jisans_payment_id');pid='';
+  history.replaceState(null,'','/payment.html');
+  $('rejectedBox').classList.add('hide');$('active').classList.add('hide');
+  resetForNewPurchase('NEW PURCHASE READY. FIRST COMPLETE PAYMENT, THEN SELECT YOUR SCREENSHOT.');
+  try{await create();setMsg('NEW PURCHASE READY. COMPLETE THE PAYMENT, THEN SELECT YOUR SCREENSHOT AND SUBMIT.');}
+  catch(e){setMsg(e.message,true)}
+}
 $('copy').onclick=async()=>{await navigator.clipboard.writeText($('binance').textContent);setMsg('Binance ID copied ✓')};
 $('shot').onchange=()=>{const f=$('shot').files[0];if(f){$('preview').src=URL.createObjectURL(f);$('preview').style.display='block'}};
 $('submit').onclick=async()=>{const f=$('shot').files[0];if(!pid||!f){setMsg('Screenshot select করুন।',true);return}$('submit').disabled=true;setMsg('Uploading...');try{const data=await compress(f),paymentReference=$('paymentReference').value.trim();const r=await fetch('/api/payment',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({action:'submit',id:pid,screenshot:data,paymentReference})});const x=await r.json();if(!r.ok)throw new Error(x.error);localStorage.setItem('jisans_payment_id',pid);$('uploadBox').classList.add('hide');$('preview').style.display='none';setMsg('Screenshot এবং payment reference submit হয়েছে। Admin review-এর অপেক্ষায় আছেন।');poll()}catch(e){setMsg(e.message,true);$('submit').disabled=false}};
-async function poll(){if(!pid)return;try{const r=await fetch('/api/payment?id='+encodeURIComponent(pid),{cache:'no-store'}),x=await r.json(),p=x.payment;if(!p){setMsg(x.error||'Payment status পাওয়া যায়নি।',true);return}if(p.status==='approved'){if(pollTimer)clearTimeout(pollTimer);localStorage.setItem('jisans_payment_id',pid);location.href='/create-password.html?id='+encodeURIComponent(pid);return}if(p.status==='rejected'){if(pollTimer)clearTimeout(pollTimer);showRejected(p.reason);return}if(p.screenshot){$('uploadBox').classList.add('hide');setMsg('Payment submitted — Admin review-এর অপেক্ষায় আছেন।')}else{resetForNewPurchase();setMsg('NEW PURCHASE READY. PAYMENT SCREENSHOT AND REFERENCE SUBMIT করুন।')}}catch(e){}pollTimer=setTimeout(poll,4000)}
+async function poll(){if(!pid)return;try{const r=await fetch('/api/payment?id='+encodeURIComponent(pid),{cache:'no-store'}),x=await r.json(),p=x.payment;if(!p){setMsg(x.error||'Payment status পাওয়া যায়নি।',true);return}if(p.status==='approved'){if(pollTimer)clearTimeout(pollTimer);localStorage.setItem('jisans_payment_id',pid);location.href='/create-password.html?id='+encodeURIComponent(pid);return}if(p.status==='rejected'){if(pollTimer)clearTimeout(pollTimer);showRejected(p.reason);return}if(p.screenshot){$('uploadBox').classList.add('hide');setMsg('Payment submitted — Admin review-এর অপেক্ষায় আছেন।')}else{resetForNewPurchase()}}catch(e){}pollTimer=setTimeout(poll,4000)}
 $('purchaseAgain').onclick=purchaseAgain;
 $('loginPass').oninput=e=>e.target.value=e.target.value.replace(/\D/g,'').slice(0,8);
 $('loginBtn').onclick=async()=>{const password=$('loginPass').value;if(password.length!==8){loginMsg('Password অবশ্যই ৮ সংখ্যার হতে হবে।',true);return}$('loginBtn').disabled=true;try{const r=await fetch('/api/access',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({action:'login',password})});const x=await r.json();if(!r.ok)throw new Error(x.error||'Login failed');pid=x.paymentId;localStorage.setItem('jisans_payment_id',pid);history.replaceState(null,'','/payment.html?id='+encodeURIComponent(pid));$('uploadBox').classList.add('hide');setMsg('Password Login সফল হয়েছে ✓');startCountdown(x.expiresAt,pid)}catch(e){loginMsg(e.message,true)}finally{$('loginBtn').disabled=false}};
-create().then(()=>poll()).catch(e=>setMsg(e.message,true));
+loadExistingOrCreate().then(ok=>{if(ok&&!$('uploadBox').classList.contains('hide'))setMsg('NEW PURCHASE READY. COMPLETE THE PAYMENT, THEN SELECT YOUR SCREENSHOT AND SUBMIT.');if(ok&&$('uploadBox').classList.contains('hide'))poll()}).catch(e=>setMsg(e.message,true));
 </script></body></html>
